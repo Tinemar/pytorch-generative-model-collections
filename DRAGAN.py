@@ -130,7 +130,7 @@ class DRAGAN(object):
         for epoch in range(self.epoch):
             epoch_start_time = time.time()
             self.G.train()
-            for iter, (x_, _) in enumerate(self.data_loader):
+            for iter, (x_, labels) in enumerate(self.data_loader):
                 if iter == self.data_loader.dataset.__len__() // self.batch_size:
                     break
 
@@ -178,12 +178,20 @@ class DRAGAN(object):
                 self.G_optimizer.zero_grad()
 
                 G_ = self.G(z_)
-                D_fake = self.D(G_)
+                pertub = self.G(x_)
+                adv_images = torch.clamp(pertub, -0.3, 0.3) + x_
+                adv_images = torch.clamp(adv_images, 0, 1)
+                D_fake = self.D(adv_images)
 
-                G_loss = self.BCE_loss(D_fake, self.y_real_)
-                self.train_hist['G_loss'].append(G_loss.item())
+                G_loss_fake = self.BCE_loss(D_fake, self.y_real_)
+                self.train_hist['G_loss_fake'].append(G_loss_fake.item())
 
-                G_loss.backward()
+                G_loss_fake.backward()
+
+                loss_perturb = torch.mean(torch.norm(pertub.view(pertub.shape[0],-1),2,dim=1))
+
+
+
                 self.G_optimizer.step()
 
                 if ((iter + 1) % 100) == 0:
