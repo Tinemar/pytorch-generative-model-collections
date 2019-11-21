@@ -1,9 +1,18 @@
-import utils, torch, time, os, pickle
+import os
+import pickle
+import time
+
 import numpy as np
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import grad
+
+import resnet
+import utils
 from dataloader import dataloader
+
 
 class generator(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
@@ -102,7 +111,14 @@ class DRAGAN(object):
             self.BCE_loss = nn.BCELoss().cuda()
         else:
             self.BCE_loss = nn.BCELoss()
-
+        # targeted model
+        net = resnet.ResNet18()
+        net = net.cuda()
+        net = torch.nn.DataParallel(net)
+        checkpoint = torch.load("H:/pytorch-cifar/checkpoint/DataPackpt.pth")
+        net.load_state_dict(checkpoint['net'])
+        self.model = net
+        self.model.eval()
         print('---------- Networks architecture -------------')
         utils.print_network(self.G)
         utils.print_network(self.D)
@@ -136,7 +152,7 @@ class DRAGAN(object):
 
                 z_ = torch.rand((self.batch_size, self.z_dim))
                 if self.gpu_mode:
-                    x_, z_ = x_.cuda(), z_.cuda()
+                    x_, z_ ,labels= x_.cuda(), z_.cuda(),labels.cuda()
 
                 # update D network
                 self.D_optimizer.zero_grad()
@@ -144,8 +160,11 @@ class DRAGAN(object):
                 D_real = self.D(x_)
                 D_real_loss = self.BCE_loss(D_real, self.y_real_)
 
-                G_ = self.G(z_)
-                D_fake = self.D(G_)
+                # G_ = self.G(z_)
+                pertub = self.G(x_)
+                adv_images = torch.clamp(pertub, -0.3, 0.3) + x_
+                adv_images = torch.clamp(adv_images, 0, 1)
+                D_fake = self.D(adv_images)
                 D_fake_loss = self.BCE_loss(D_fake, self.y_fake_)
 
                 """ DRAGAN Loss (Gradient penalty) """
@@ -167,7 +186,7 @@ class DRAGAN(object):
                     gradients = grad(outputs=pred_hat, inputs=interpolates, grad_outputs=torch.ones(pred_hat.size()),
                          create_graph=True, retain_graph=True, only_inputs=True)[0]
 
-                gradient_penalty = self.lambda_ * ((gradients.view(gradients.size()[0], -1).norm(2, 1) - 1) ** 2).mean()
+                gradient_pmenalty = self.lambda_ * ((gradients.view(gradients.size()[0], -1).norm(2, 1) - 1) ** 2).mean()
 
                 D_loss = D_real_loss + D_fake_loss + gradient_penalty
                 self.train_hist['D_loss'].append(D_loss.item())
@@ -177,10 +196,7 @@ class DRAGAN(object):
                 # update G network
                 self.G_optimizer.zero_grad()
 
-                G_ = self.G(z_)
-                pertub = self.G(x_)
-                adv_images = torch.clamp(pertub, -0.3, 0.3) + x_
-                adv_images = torch.clamp(adv_images, 0, 1)
+                # G_ = self.G(z_)
                 D_fake = self.D(adv_images)
 
                 G_loss_fake = self.BCE_loss(D_fake, self.y_real_)
@@ -189,9 +205,20 @@ class DRAGAN(object):
                 G_loss_fake.backward()
 
                 loss_perturb = torch.mean(torch.norm(pertub.view(pertub.shape[0],-1),2,dim=1))
+                logits_model = self.model(adv_images)
+                probs_model = F.softmax(logits_model, dim=1)
+                onehot_labels = torch.eye(10, device='cuda')[labels]
 
-
-
+                # C&W loss function
+                real = torch.sum(onehot_labels * probs_model, dim=1)
+                other, _ = torch.max((1 - onehot_labels) * probs_model - onehot_labels * 10000, dim=1)
+                zeros = torch.zeros_like(other)
+                loss_adv = torch.max(real - other, zeros)
+                loss_adv = torch.sum(loss_adv)
+                adv_lambda = 10
+                pert_lambda = 1
+                loss_G = adv_lambda * loss_adv + pert_lambda * loss_perturb
+                loss_G.backward()
                 self.G_optimizer.step()
 
                 if ((iter + 1) % 100) == 0:
