@@ -41,6 +41,7 @@ class generator(nn.Module):
         utils.initialize_weights(self)
 
     def forward(self, input):
+        input = input.view(64,-1)
         x = self.fc(input)
         x = x.view(-1, 128, (self.input_size // 4), (self.input_size // 4))
         x = self.deconv(x)
@@ -92,8 +93,9 @@ class DRAGAN(object):
         self.gpu_mode = args.gpu_mode
         self.model_name = args.gan_type
         self.input_size = args.input_size
-        self.z_dim = 62
+        self.z_dim = 2352
         self.lambda_ = 0.25
+        self.checkpoint = args.checkpoint
 
         # load dataset
         self.data_loader = dataloader(self.dataset, self.input_size, self.batch_size)
@@ -101,7 +103,15 @@ class DRAGAN(object):
 
         # networks init
         self.G = generator(input_dim=self.z_dim, output_dim=data.shape[1], input_size=self.input_size)
+        print(self.z_dim,data.shape[1],self.input_size)
         self.D = discriminator(input_dim=data.shape[1], output_dim=1, input_size=self.input_size)
+        save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)
+        print(save_dir)
+        # load checkpoint
+        if self.checkpoint != '':
+            self.G.load_state_dict(torch.load(os.path.join(save_dir, self.model_name + '_G.pkl')))
+            self.D.load_state_dict(torch.load(os.path.join(save_dir, self.model_name + '_D.pkl')))
+
         self.G_optimizer = optim.Adam(self.G.parameters(), lr=args.lrG, betas=(args.beta1, args.beta2))
         self.D_optimizer = optim.Adam(self.D.parameters(), lr=args.lrD, betas=(args.beta1, args.beta2))
 
@@ -158,10 +168,11 @@ class DRAGAN(object):
                 self.D_optimizer.zero_grad()
 
                 D_real = self.D(x_)
-                D_real_loss = self.BCE_loss(D_real, self.y_real_)
-
-                # G_ = self.G(z_)
+                D_real_loss = self.BCE_loss(D_real, self.y_real_)                
+                # exit()
+                # pertub = self.G(z_)
                 pertub = self.G(x_)
+                # print(pertub.size(),x_.size())
                 adv_images = torch.clamp(pertub, -0.3, 0.3) + x_
                 adv_images = torch.clamp(adv_images, 0, 1)
                 D_fake = self.D(adv_images)
@@ -186,11 +197,11 @@ class DRAGAN(object):
                     gradients = grad(outputs=pred_hat, inputs=interpolates, grad_outputs=torch.ones(pred_hat.size()),
                          create_graph=True, retain_graph=True, only_inputs=True)[0]
 
-                gradient_pmenalty = self.lambda_ * ((gradients.view(gradients.size()[0], -1).norm(2, 1) - 1) ** 2).mean()
+                gradient_penalty = self.lambda_ * ((gradients.view(gradients.size()[0], -1).norm(2, 1) - 1) ** 2).mean()
 
                 D_loss = D_real_loss + D_fake_loss + gradient_penalty
                 self.train_hist['D_loss'].append(D_loss.item())
-                D_loss.backward()
+                D_loss.backward(retain_graph=True)
                 self.D_optimizer.step()
 
                 # update G network
@@ -199,10 +210,10 @@ class DRAGAN(object):
                 # G_ = self.G(z_)
                 D_fake = self.D(adv_images)
 
-                G_loss_fake = self.BCE_loss(D_fake, self.y_real_)
-                self.train_hist['G_loss_fake'].append(G_loss_fake.item())
+                G_loss = self.BCE_loss(D_fake, self.y_real_)
+                self.train_hist['G_loss'].append(G_loss.item())
 
-                G_loss_fake.backward()
+                G_loss.backward(retain_graph=True)
 
                 loss_perturb = torch.mean(torch.norm(pertub.view(pertub.shape[0],-1),2,dim=1))
                 logits_model = self.model(adv_images)
@@ -217,17 +228,19 @@ class DRAGAN(object):
                 loss_adv = torch.sum(loss_adv)
                 adv_lambda = 10
                 pert_lambda = 1
-                loss_G = adv_lambda * loss_adv + pert_lambda * loss_perturb
-                loss_G.backward()
+                loss_G_adv= adv_lambda * loss_adv + pert_lambda * loss_perturb
+                loss_G_adv.backward()
                 self.G_optimizer.step()
 
                 if ((iter + 1) % 100) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f" %
-                          ((epoch + 1), (iter + 1), self.data_loader.dataset.__len__() // self.batch_size, D_loss.item(), G_loss.item()))
+                    print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f,loss_adv:%.8f" %
+                          ((epoch + 1), (iter + 1), self.data_loader.dataset.__len__() // self.batch_size, D_loss.item(), G_loss.item(),loss_adv.item()))
 
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             with torch.no_grad():
                 self.visualize_results((epoch+1))
+            if epoch%20 == 0:
+                self.save()
 
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),

@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument('--beta2', type=float, default=0.999)
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--benchmark_mode', type=bool, default=True)
+    parser.add_argument('--checkpoint',type=str,default='')
 
     return check_args(parser.parse_args())
 
