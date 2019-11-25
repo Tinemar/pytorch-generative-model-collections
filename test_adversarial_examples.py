@@ -42,7 +42,7 @@ pretrained_G.eval()
 
 # test adversarial examples in MNIST training dataset
 transform = transforms.Compose([transforms.Resize((28, 28)), transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
-cifar10_dataset = torchvision.datasets.CIFAR10('./data/cifar10', train=True, transform=transform, download=True)
+cifar10_dataset = torchvision.datasets.CIFAR10('H:/cifar-10-batches-py', train=True, transform=transform, download=True)
 train_dataloader = DataLoader(cifar10_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 num_correct = 0
 
@@ -64,11 +64,11 @@ for i, data in enumerate(train_dataloader):
 
 print('cifar10 training dataset:')
 print('num_correct: ', num_correct.item())
-print('accuracy of adv imgs in training set: %f\n'%(num_correct.item()/len(train_dataloader)))
+print('accuracy of adv imgs in training set: %f\n'%(num_correct.item()/len(cifar10_dataset)),len(cifar10_dataset))
 
 # test adversarial examples in MNIST testing dataset
-cifar10_dataset = torchvision.datasets.CIFAR10('./data/cifar10', train=False, transform=transform, download=True)
-test_dataloader = DataLoader(cifar10_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+cifar10_dataset_test = torchvision.datasets.CIFAR10('H:/cifar-10-batches-py', train=False, transform=transform, download=True)
+test_dataloader = DataLoader(cifar10_dataset_test, batch_size=batch_size, shuffle=False, num_workers=0)
 num_correct = 0
 
 for i, data in enumerate(test_dataloader):
@@ -85,4 +85,4 @@ for i, data in enumerate(test_dataloader):
     num_correct += torch.sum(pred_lab==test_label,0)
 
 print('num_correct: ', num_correct.item())
-print('accuracy of adv imgs in testing set: %f\n'%(num_correct.item()/len(test_dataloader)))
+print('accuracy of adv imgs in testing set: %f\n'%(num_correct.item()/len(cifar10_dataset)),len(cifar10_dataset_test))

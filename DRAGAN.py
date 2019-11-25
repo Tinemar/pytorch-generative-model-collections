@@ -96,7 +96,10 @@ class DRAGAN(object):
         self.z_dim = 2352
         self.lambda_ = 0.25
         self.checkpoint = args.checkpoint
-
+        with open(os.path.join(self.save_dir, self.dataset, self.model_name, self.model_name + 'best.txt'),'r') as f:
+            temp = f.readlines()
+            self.loss_adv_avg = float(temp[0])
+            self.loss_perturb_avg = float(temp[1])
         # load dataset
         self.data_loader = dataloader(self.dataset, self.input_size, self.batch_size)
         data = self.data_loader.__iter__().__next__()[0]
@@ -149,11 +152,14 @@ class DRAGAN(object):
         self.y_real_, self.y_fake_ = torch.ones(self.batch_size, 1), torch.zeros(self.batch_size, 1)
         if self.gpu_mode:
             self.y_real_, self.y_fake_ = self.y_real_.cuda(), self.y_fake_.cuda()
+        
 
         self.D.train()
         print('training start!!')
         start_time = time.time()
         for epoch in range(self.epoch):
+            loss_adv_sum = 0
+            loss_perturb_sum = 0
             epoch_start_time = time.time()
             self.G.train()
             for iter, (x_, labels) in enumerate(self.data_loader):
@@ -226,28 +232,36 @@ class DRAGAN(object):
                 zeros = torch.zeros_like(other)
                 loss_adv = torch.max(real - other, zeros)
                 loss_adv = torch.sum(loss_adv)
+                # loss_adv = -F.mse_loss(logits_model, onehot_labels)
                 adv_lambda = 10
-                pert_lambda = 1
+                pert_lambda = 2
                 loss_G_adv= adv_lambda * loss_adv + pert_lambda * loss_perturb
                 loss_G_adv.backward()
                 self.G_optimizer.step()
-
+                loss_adv_sum += loss_adv.item()
+                loss_perturb_sum += loss_perturb.item()
                 if ((iter + 1) % 100) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f,loss_adv:%.8f" %
-                          ((epoch + 1), (iter + 1), self.data_loader.dataset.__len__() // self.batch_size, D_loss.item(), G_loss.item(),loss_adv.item()))
-
+                    print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f,loss_adv:%.8f,loss_pertube:%.8f"%
+                          ((epoch + 1), (iter + 1), self.data_loader.dataset.__len__() // self.batch_size, D_loss.item(), G_loss.item(),loss_adv.item(),loss_perturb.item()))
+            loss_adv_avg_temp = loss_adv_sum/self.data_loader.dataset.__len__()
+            loss_perturb_avg_temp = loss_perturb_sum/self.data_loader.dataset.__len__()
+            print(loss_adv_avg_temp,loss_perturb_avg_temp)
+            print(self.loss_adv_avg,self.loss_perturb_avg)
+            if self.loss_adv_avg>=loss_adv_avg_temp and self.loss_perturb_avg >= loss_perturb_avg_temp:
+                self.loss_adv_avg = loss_adv_avg_temp
+                self.loss_perturb_avg = loss_perturb_avg_temp
+                print(self.loss_adv_avg,self.loss_perturb_avg)
+                self.save(best=True)
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             with torch.no_grad():
                 self.visualize_results((epoch+1))
-            if epoch%20 == 0:
+            if epoch %10 ==  0:
                 self.save()
-
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
               self.epoch, self.train_hist['total_time'][0]))
         print("Training finish!... save training results")
-
-        self.save()
+        
         utils.generate_animation(self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name, self.epoch)
         utils.loss_plot(self.train_hist, os.path.join(self.save_dir, self.dataset, self.model_name), self.model_name)
 
@@ -280,14 +294,19 @@ class DRAGAN(object):
         utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
                     self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name + '_epoch%03d' % epoch + '.png')
 
-    def save(self):
+    def save(self,best=False):
         save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)
 
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-
-        torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + '_G.pkl'))
-        torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + '_D.pkl'))
+        if best == True:
+            with open(os.path.join(save_dir, self.model_name + 'best.txt'),'w') as f:
+                f.write(str(self.loss_adv_avg)+'\n'+str(self.loss_perturb_avg))
+            torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + '_G_best.pkl'))
+            torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + '_D_best.pkl'))
+        else:
+            torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + '_G.pkl'))
+            torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + '_D.pkl'))
 
         with open(os.path.join(save_dir, self.model_name + '_history.pkl'), 'wb') as f:
             pickle.dump(self.train_hist, f)
