@@ -176,10 +176,10 @@ class DRAGAN(object):
                 D_real = self.D(x_)
                 D_real_loss = self.BCE_loss(D_real, self.y_real_)                
                 # exit()
-                # pertub = self.G(z_)
-                pertub = self.G(x_)
-                # print(pertub.size(),x_.size())
-                adv_images = torch.clamp(pertub, -0.3, 0.3) + x_
+                # perturb = self.G(z_)
+                perturb = self.G(x_)
+                # print(perturb.size(),x_.size())
+                adv_images = torch.clamp(perturb, -0.3, 0.3) + x_
                 adv_images = torch.clamp(adv_images, 0, 1)
                 D_fake = self.D(adv_images)
                 D_fake_loss = self.BCE_loss(D_fake, self.y_fake_)
@@ -220,13 +220,14 @@ class DRAGAN(object):
                 self.train_hist['G_loss'].append(G_loss.item())
 
                 G_loss.backward(retain_graph=True)
-
-                loss_perturb = torch.mean(torch.norm(pertub.view(pertub.shape[0],-1),2,dim=1))
+                # cw loss
+                loss_perturb = torch.mean(torch.norm(perturb.view(perturb.shape[0],-1),2,dim=1))
+                C = 0.1
+                loss_perturb = torch.max(loss_perturb - C, torch.zeros(1, device='cuda'))
                 logits_model = self.model(adv_images)
                 probs_model = F.softmax(logits_model, dim=1)
                 onehot_labels = torch.eye(10, device='cuda')[labels]
-
-                # C&W loss function
+                # adv loss
                 real = torch.sum(onehot_labels * probs_model, dim=1)
                 other, _ = torch.max((1 - onehot_labels) * probs_model - onehot_labels * 10000, dim=1)
                 zeros = torch.zeros_like(other)
@@ -251,12 +252,12 @@ class DRAGAN(object):
                 self.loss_adv_avg = loss_adv_avg_temp
                 self.loss_perturb_avg = loss_perturb_avg_temp
                 print(self.loss_adv_avg,self.loss_perturb_avg)
-                self.save(best=True)
+                self.save(best=True,epoch=epoch)
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             with torch.no_grad():
                 self.visualize_results((epoch+1))
-            if epoch %10 ==  0:
-                self.save()
+            if epoch %20 ==  0:
+                self.save(epoch=epoch)
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
               self.epoch, self.train_hist['total_time'][0]))
@@ -294,7 +295,7 @@ class DRAGAN(object):
         utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
                     self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name + '_epoch%03d' % epoch + '.png')
 
-    def save(self,best=False):
+    def save(self,best=False,epoch=0):
         save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)
 
         if not os.path.exists(save_dir):
@@ -305,8 +306,8 @@ class DRAGAN(object):
             torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + '_G_best.pkl'))
             torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + '_D_best.pkl'))
         else:
-            torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + '_G.pkl'))
-            torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + '_D.pkl'))
+            torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + str(epoch) + '_G.pkl'))
+            torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + str(epoch) + '_D.pkl'))
 
         with open(os.path.join(save_dir, self.model_name + '_history.pkl'), 'wb') as f:
             pickle.dump(self.train_hist, f)

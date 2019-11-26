@@ -35,7 +35,7 @@ net.load_state_dict(checkpoint['net'])
 target_model = net
 target_model.eval()
 # load the generator of adversarial examples
-pretrained_generator_path = './models/cifar10/DRAGAN/DRAGAN_G.pkl'
+pretrained_generator_path = './models/cifar10/DRAGAN/DRAGAN_G_best.pkl'
 pretrained_G = DRAGAN.generator(input_dim=2352, output_dim=3, input_size=28).to(device)
 pretrained_G.load_state_dict(torch.load(pretrained_generator_path))
 pretrained_G.eval()
@@ -51,7 +51,7 @@ for i, data in enumerate(train_dataloader):
     test_img, test_label = test_img.to(device), test_label.to(device)
     try:
         perturbation = pretrained_G(test_img)
-        perturbation = torch.clamp(perturbation, -0.3, 0.3)
+        # perturbation = torch.clamp(perturbation, -0.3, 0.3)
         adv_img = perturbation + test_img
     
     except:
@@ -76,7 +76,7 @@ for i, data in enumerate(test_dataloader):
     test_img, test_label = test_img.to(device), test_label.to(device)
     try:
         perturbation = pretrained_G(test_img)
-        perturbation = torch.clamp(perturbation, -0.3, 0.3)
+        # perturbation = torch.clamp(perturbation, -0.3, 0.3)
         adv_img = perturbation + test_img
     except:
         break
@@ -85,4 +85,4 @@ for i, data in enumerate(test_dataloader):
     num_correct += torch.sum(pred_lab==test_label,0)
 
 print('num_correct: ', num_correct.item())
-print('accuracy of adv imgs in testing set: %f\n'%(num_correct.item()/len(cifar10_dataset)),len(cifar10_dataset_test))
+print('accuracy of adv imgs in testing set: %f\n'%(num_correct.item()/len(cifar10_dataset_test)),len(cifar10_dataset_test))
