@@ -9,6 +9,8 @@ I tried to implement this repository as much as possible with [tensorflow-genera
 
 This repository is included code for CPU mode Pytorch, but i did not test. I tested only in GPU mode Pytorch.
 
+python main.py --dataset cifar10 --gan_type DRAGAN --epoch 50 --batch_size 64
+
 ## Dataset
 
 - MNIST
