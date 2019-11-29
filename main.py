@@ -3,6 +3,7 @@ from GAN import GAN
 from CGAN import CGAN
 from LSGAN import LSGAN
 from DRAGAN import DRAGAN
+from DRAGAN_adv import DRAGAN_adv
 from ACGAN import ACGAN
 from WGAN import WGAN
 from WGAN_GP import WGAN_GP
@@ -16,7 +17,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description=desc)
 
     parser.add_argument('--gan_type', type=str, default='GAN',
-                        choices=['GAN', 'CGAN', 'infoGAN', 'ACGAN', 'EBGAN', 'BEGAN', 'WGAN', 'WGAN_GP', 'DRAGAN', 'LSGAN'],
+                        choices=['GAN', 'CGAN', 'infoGAN', 'ACGAN', 'EBGAN', 'BEGAN', 'WGAN', 'WGAN_GP', 'DRAGAN','DRAGAN_adv', 'LSGAN'],
                         help='The type of GAN')
     parser.add_argument('--dataset', type=str, default='mnist', choices=['mnist', 'fashion-mnist', 'cifar10', 'cifar100', 'svhn', 'stl10', 'lsun-bed'],
                         help='The name of dataset')
@@ -35,6 +36,7 @@ def parse_args():
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--benchmark_mode', type=bool, default=True)
     parser.add_argument('--checkpoint',type=str,default='')
+    parser.add_argument('--adv',type=bool,default=False)
 
     return check_args(parser.parse_args())
 
@@ -93,6 +95,8 @@ def main():
         gan = WGAN_GP(args)
     elif args.gan_type == 'DRAGAN':
         gan = DRAGAN(args)
+    elif args.gan_type == 'DRAGAN_adv':
+        gan = DRAGAN_adv(args)
     elif args.gan_type == 'LSGAN':
         gan = LSGAN(args)
     elif args.gan_type == 'BEGAN':
