@@ -120,6 +120,7 @@ class DRAGAN_adv(object):
         print(save_dir)
         # load checkpoint
         if self.checkpoint != '':
+            print(self.checkpoint+'G.pkl')
             self.G.load_state_dict(torch.load(self.checkpoint+'G.pkl'))
             self.D.load_state_dict(torch.load(self.checkpoint+'D.pkl'))
 
@@ -180,9 +181,10 @@ class DRAGAN_adv(object):
                 self.D_optimizer.zero_grad()
                 D_real = self.D(x_)
                 D_real_loss = self.BCE_loss(D_real, self.y_real_)
-                perturb = self.G(x_)
-                adv_images = torch.clamp(perturb, -0.3, 0.3) + x_
-                adv_images = torch.clamp(adv_images, 0, 1)
+
+                adv_images = self.G(z_)
+                # adv_images = torch.clamp(perturb, -0.3, 0.3) + x_
+                # adv_images = torch.clamp(adv_images, 0, 1)
                 # adv_images = x_ + perturb
                 # print(perturb.size(),x_.size())
                 D_fake = self.D(adv_images)
@@ -218,14 +220,17 @@ class DRAGAN_adv(object):
 
                 # update G network
                 self.G_optimizer.zero_grad()
+                adv_images = self.G(z_)
                 D_fake = self.D(adv_images)
+
                 G_loss = self.BCE_loss(D_fake, self.y_real_)
                 self.train_hist['G_loss'].append(G_loss.item())
 
                 G_loss.backward(retain_graph=True)
+
                 # cw loss
                 loss_perturb = torch.mean(torch.norm(
-                    perturb.view(perturb.shape[0], -1), 2, dim=1))
+                    adv_images.view(adv_images.shape[0], -1), 2, dim=1))
                 # C = 0.1
                 # loss_perturb = torch.max(
                 #     loss_perturb - C, torch.zeros(1, device='cuda'))
@@ -250,9 +255,8 @@ class DRAGAN_adv(object):
                 if ((iter + 1) % 100) == 0:
                     print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f,loss_adv:%.8f,loss_pertube:%.8f" %
                           ((epoch + 1), (iter + 1), self.data_loader.dataset.__len__() // self.batch_size, D_loss.item(), G_loss.item(), loss_adv.item(), loss_perturb.item()))
-                if iter == 7:
-                    with torch.no_grad():
-                        self.visualize_results((epoch+1),adv_images)
+            with torch.no_grad():
+                self.visualize_results((epoch+1))        
             loss_adv_avg_temp = loss_adv_sum/self.data_loader.dataset.__len__()
             loss_perturb_avg_temp = loss_perturb_sum/self.data_loader.dataset.__len__()
             print(loss_adv_avg_temp, loss_perturb_avg_temp)
@@ -277,17 +281,25 @@ class DRAGAN_adv(object):
         utils.loss_plot(self.train_hist, os.path.join(
             self.save_dir, self.dataset, self.model_name), self.model_name)
 
-    def visualize_results(self, epoch,images):
+    def visualize_results(self, epoch, fix=True):
         self.G.eval()
 
         if not os.path.exists(self.result_dir + '/' + self.dataset + '/' + self.model_name):
-            os.makedirs(self.result_dir + '/' +
-                        self.dataset + '/' + self.model_name)
+            os.makedirs(self.result_dir + '/' + self.dataset + '/' + self.model_name)
 
         tot_num_samples = min(self.sample_num, self.batch_size)
         image_frame_dim = int(np.floor(np.sqrt(tot_num_samples)))
 
-        samples = self.G(images)
+        if fix:
+            """ fixed noise """
+            samples = self.G(self.sample_z_)
+        else:
+            """ random noise """
+            sample_z_ = torch.rand((self.batch_size, self.z_dim))
+            if self.gpu_mode:
+                sample_z_ = sample_z_.cuda()
+
+            samples = self.G(sample_z_)
 
         if self.gpu_mode:
             samples = samples.cpu().data.numpy().transpose(0, 2, 3, 1)
@@ -296,7 +308,7 @@ class DRAGAN_adv(object):
 
         samples = (samples + 1) / 2
         utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
-                          self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name + '_epoch%03d' % epoch + '.png')
+                    self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name + '_epoch%03d' % epoch + '.png')
 
     def save(self, best=False, epoch=0):
         save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)

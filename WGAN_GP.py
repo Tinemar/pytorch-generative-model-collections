@@ -1,10 +1,13 @@
-import utils, torch, time, os, pickle
+import Utils, torch, time, os, pickle
 import numpy as np
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
+
 from torch.autograd import grad
 from dataloader import dataloader
-
+import cifar10.cifar_resnets as cifar_resnets
+import cifar10.cifar_loader as cifar_loader
 class generator(nn.Module):
     # Network Architecture is exactly same as in infoGAN (https://arxiv.org/abs/1606.03657)
     # Architecture : FC1024_BR-FC7x7x128_BR-(64)4dc2s_BR-(1)4dc2s_S
@@ -29,7 +32,7 @@ class generator(nn.Module):
             nn.ConvTranspose2d(64, self.output_dim, 4, 2, 1),
             nn.Tanh(),
         )
-        utils.initialize_weights(self)
+        Utils.initialize_weights(self)
 
     def forward(self, input):
         x = self.fc(input)
@@ -61,7 +64,7 @@ class discriminator(nn.Module):
             nn.Linear(1024, self.output_dim),
             # nn.Sigmoid(),
         )
-        utils.initialize_weights(self)
+        Utils.initialize_weights(self)
 
     def forward(self, input):
         x = self.conv(input)
@@ -85,8 +88,12 @@ class WGAN_GP(object):
         self.input_size = args.input_size
         self.z_dim = 62
         self.lambda_ = 10
-        self.n_critic = 5               # the number of iterations of the critic per generator iteration
-
+        self.n_critic = 5           # the number of iterations of the critic per generator iteration
+        self.checkpoint = args.checkpoint
+        # with open(os.path.join(self.save_dir, self.dataset, self.model_name, self.model_name + 'best.txt'), 'r') as f:
+        #     temp = f.readlines()
+        self.loss_adv_avg = 1
+        self.loss_perturb_avg = 1
         # load dataset
         self.data_loader = dataloader(self.dataset, self.input_size, self.batch_size)
         data = self.data_loader.__iter__().__next__()[0]
@@ -96,16 +103,27 @@ class WGAN_GP(object):
         self.D = discriminator(input_dim=data.shape[1], output_dim=1, input_size=self.input_size)
         self.G_optimizer = optim.Adam(self.G.parameters(), lr=args.lrG, betas=(args.beta1, args.beta2))
         self.D_optimizer = optim.Adam(self.D.parameters(), lr=args.lrD, betas=(args.beta1, args.beta2))
+        # load checkpoint
+        if self.checkpoint != '':
+            print(self.checkpoint+'G.pkl')
+            self.G.load_state_dict(torch.load(self.checkpoint+'G.pkl'))
+            self.D.load_state_dict(torch.load(self.checkpoint+'D.pkl'))
 
         if self.gpu_mode:
             self.G.cuda()
             self.D.cuda()
 
         print('---------- Networks architecture -------------')
-        utils.print_network(self.G)
-        utils.print_network(self.D)
+        Utils.print_network(self.G)
+        Utils.print_network(self.D)
         print('-----------------------------------------------')
-
+        # targeted model
+        self.model, normalizer = cifar_loader.load_pretrained_cifar_resnet(
+            flavor=32, return_normalizer=True)
+        # model = cifar_resnets.resnet32()
+        # model.load_state_dict(torch.load('./advtrain.resnet32.000100.path.tar'))
+        self.model = self.model.cuda()
+        self.model.eval()
         # fixed noise
         self.sample_z_ = torch.rand((self.batch_size, self.z_dim))
         if self.gpu_mode:
@@ -127,8 +145,10 @@ class WGAN_GP(object):
         start_time = time.time()
         for epoch in range(self.epoch):
             self.G.train()
+            loss_adv_sum = 0
+            loss_perturb_sum = 0
             epoch_start_time = time.time()
-            for iter, (x_, _) in enumerate(self.data_loader):
+            for iter, (x_, labels) in enumerate(self.data_loader):
                 if iter == self.data_loader.dataset.__len__() // self.batch_size:
                     break
 
@@ -178,7 +198,39 @@ class WGAN_GP(object):
                     G_loss = -torch.mean(D_fake)
                     self.train_hist['G_loss'].append(G_loss.item())
 
-                    G_loss.backward()
+                    # G_loss.backward()
+
+                    # adv part
+                    # cw loss
+                    loss_perturb = torch.mean(torch.norm(
+                        G_.view(G_.shape[0], -1), 2, dim=1))
+                    C = 0.1
+                    loss_perturb = torch.max(
+                        loss_perturb - C, torch.zeros(1, device='cuda'))
+                    # adv loss
+                    logits_model = self.model(G_)
+                    probs_model = F.softmax(logits_model, dim=1)
+                    target_label = torch.LongTensor(64).zero_()
+                    target_label = target_label.cuda()
+                    onehot_labels = torch.eye(10, device='cuda')[target_label]
+                    
+                    real = torch.sum(onehot_labels * probs_model, dim=1)
+                    other, _ = torch.max(
+                        (1 - onehot_labels) * probs_model - onehot_labels * 10000, dim=1)
+                    zeros = torch.zeros_like(other)
+                    loss_adv = torch.max(other - real, zeros)
+                    loss_adv = torch.sum(loss_adv)
+                    # loss_adv = -F.mse_loss(logits_model, onehot_labels)
+                    adv_lambda = 1
+                    pert_lambda = 10
+                    loss_G_adv = adv_lambda * loss_adv + pert_lambda * loss_perturb
+                    G_loss_total = loss_G_adv + 15*G_loss
+                    
+
+                    loss_adv_sum += loss_adv.item()
+                    loss_perturb_sum += loss_perturb.item()
+
+                    G_loss_total.backward()
                     self.G_optimizer.step()
 
                     self.train_hist['D_loss'].append(D_loss.item())
@@ -186,10 +238,20 @@ class WGAN_GP(object):
                 if ((iter + 1) % 100) == 0:
                     print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f" %
                           ((epoch + 1), (iter + 1), self.data_loader.dataset.__len__() // self.batch_size, D_loss.item(), G_loss.item()))
-
+            if (epoch+1) % 20 == 0:
+                self.save(epoch=epoch+1)
             self.train_hist['per_epoch_time'].append(time.time() - epoch_start_time)
             with torch.no_grad():
                 self.visualize_results((epoch+1))
+            loss_adv_avg_temp = loss_adv_sum/self.data_loader.dataset.__len__()
+            loss_perturb_avg_temp = loss_perturb_sum/self.data_loader.dataset.__len__()
+            print(loss_adv_avg_temp, loss_perturb_avg_temp)
+            print(self.loss_adv_avg, self.loss_perturb_avg)
+            if self.loss_adv_avg >= loss_adv_avg_temp and self.loss_perturb_avg >= loss_perturb_avg_temp:
+                self.loss_adv_avg = loss_adv_avg_temp
+                self.loss_perturb_avg = loss_perturb_avg_temp
+                print(self.loss_adv_avg, self.loss_perturb_avg)
+                self.save(best=True, epoch=epoch)
 
         self.train_hist['total_time'].append(time.time() - start_time)
         print("Avg one epoch time: %.2f, total %d epochs time: %.2f" % (np.mean(self.train_hist['per_epoch_time']),
@@ -197,9 +259,9 @@ class WGAN_GP(object):
         print("Training finish!... save training results")
 
         self.save()
-        utils.generate_animation(self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name,
+        Utils.generate_animation(self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name,
                                  self.epoch)
-        utils.loss_plot(self.train_hist, os.path.join(self.save_dir, self.dataset, self.model_name), self.model_name)
+        Utils.loss_plot(self.train_hist, os.path.join(self.save_dir, self.dataset, self.model_name), self.model_name)
 
     def visualize_results(self, epoch, fix=True):
         self.G.eval()
@@ -227,17 +289,26 @@ class WGAN_GP(object):
             samples = samples.data.numpy().transpose(0, 2, 3, 1)
 
         samples = (samples + 1) / 2
-        utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
+        Utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
                           self.result_dir + '/' + self.dataset + '/' + self.model_name + '/' + self.model_name + '_epoch%03d' % epoch + '.png')
 
-    def save(self):
+    def save(self, best=False, epoch=0):
         save_dir = os.path.join(self.save_dir, self.dataset, self.model_name)
 
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-
-        torch.save(self.G.state_dict(), os.path.join(save_dir, self.model_name + '_G.pkl'))
-        torch.save(self.D.state_dict(), os.path.join(save_dir, self.model_name + '_D.pkl'))
+        if best == True:
+            with open(os.path.join(save_dir, self.model_name + 'best.txt'), 'w') as f:
+                f.write(str(self.loss_adv_avg)+'\n'+str(self.loss_perturb_avg))
+            torch.save(self.G.state_dict(), os.path.join(
+                save_dir, self.model_name + '_G_best.pkl'))
+            torch.save(self.D.state_dict(), os.path.join(
+                save_dir, self.model_name + '_D_best.pkl'))
+        else:
+            torch.save(self.G.state_dict(), os.path.join(
+                save_dir, self.model_name + str(epoch) + '_G.pkl'))
+            torch.save(self.D.state_dict(), os.path.join(
+                save_dir, self.model_name + str(epoch) + '_D.pkl'))
 
         with open(os.path.join(save_dir, self.model_name + '_history.pkl'), 'wb') as f:
             pickle.dump(self.train_hist, f)

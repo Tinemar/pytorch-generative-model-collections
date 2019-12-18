@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument('--split', type=str, default='', help='The split flag for svhn and stl10')
     parser.add_argument('--epoch', type=int, default=50, help='The number of epochs to run')
     parser.add_argument('--batch_size', type=int, default=64, help='The size of batch')
-    parser.add_argument('--input_size', type=int, default=28, help='The size of input image')
+    parser.add_argument('--input_size', type=int, default=32, help='The size of input image')
     parser.add_argument('--save_dir', type=str, default='models',
                         help='Directory name to save the model')
     parser.add_argument('--result_dir', type=str, default='results', help='Directory name to save the generated images')
@@ -79,7 +79,7 @@ def main():
         torch.backends.cudnn.benchmark = True
 
         # declare instance for GAN
-    if args.gan_type == 'GAN':
+    if args.gan_type  == 'GAN':
         gan = GAN(args)
     elif args.gan_type == 'CGAN':
         gan = CGAN(args)
