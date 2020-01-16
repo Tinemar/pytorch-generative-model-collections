@@ -1,7 +1,7 @@
 {
     "_comment": "===================GENERAL CONFIGS=========================",
     "dataset_path": "./cifar-10-batches-py/",
-    "model_path": "./",
+    "model_path": "./target_models",
     "output_image_path": "./output_images/",
     "batch_size": 128,
     "default_workers": 0,

@@ -1,38 +1,41 @@
 import torch
 import torchvision.datasets
 import torchvision.transforms as transforms
+from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from torchvision import transforms as transforms
 import numpy as np
 import torch.nn.functional as F
 import utils.image_utils as img_utils
 
-
+import os
 import WGAN_GP
 import resnet
 import Utils
 import cifar10.cifar_resnets as cifar_resnets
+import cifar10.wide_resnets as wide_resnets
 import cifar10.cifar_loader as cifar_loader
+import mnist.model
 use_cuda = True
 image_nc = 1
 batch_size = 64
 
 
-def visualize_results(G, batch_size):
-    G.eval()
+def visualize_results(G, batch_size,adv_images,i):
+    # G.eval()
     tot_num_samples = 64
     image_frame_dim = int(np.floor(np.sqrt(tot_num_samples)))
+    # print(image_frame_dim)
+    # # sample_z_ = torch.rand((64, 2352))
+    # sample_z_ = torch.rand((batch_size, 62))
+    # sample_z_ = sample_z_.cuda()
+    # samples = G(sample_z_)
 
-    # sample_z_ = torch.rand((64, 2352))
-    sample_z_ = torch.rand((batch_size, 62))
-    sample_z_ = sample_z_.cuda()
-    samples = G(sample_z_)
-
-    samples = samples.cpu().data.numpy().transpose(0, 2, 3, 1)
+    samples = adv_images.cpu().data.numpy().transpose(0, 2, 3, 1)
 
     samples = (samples + 1) / 2
-    Utils.save_images(samples[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
-                      'H:/adversarial_attacks/pytorch-generative-model-collections/results/cifar10/WGAN_GP.png')
+    Utils.save_images(samples[:(image_frame_dim * image_frame_dim)+i*64, :, :, :], [image_frame_dim, image_frame_dim],
+                      './results/cifar10/test/WGAN_GP'+str(i)+'.png')
 
 
 # Define what device we are using
@@ -48,37 +51,66 @@ device = torch.device("cuda" if (
 # net.load_state_dict(checkpoint['net'])
 # target_model = net
 # target_model.eval()
-target_model, _ = cifar_loader.load_pretrained_cifar_resnet(
-            flavor=32, return_normalizer=True)
-target_model = cifar_resnets.resnet20()
+
+#cifar10 resnet
+# target_model= cifar_loader.load_pretrained_cifar_resnet(flavor=32)
+# target_model = cifar_loader.load_pretrained_cifar_wide_resnet()
+target_model = cifar_loader.load_pretrained_cifar_resnet(flavor=20)
+# target_model = wide_resnets.Wide_ResNet(28, 10, 0, 10)
+
+
+#mnist
+# from mnist import model, dataset
+# target_model = model.mnist(pretrained=os.path.join(os.path.expanduser('~/.torch/models'), 'mnist.pth'))
+
 #advtrain model
-# target_model.load_state_dict(torch.load('./tutorial_fgsm.resnet32.000050.path.tar'))
+# target_model.load_state_dict(torch.load('./target_models\PGDadv_trained_resnet32_197.pkl'))
+# target_model.load_state_dict(torch.load('./target_models\PGDadv_trained_wideresnet_68.pkl'))
+target_model.load_state_dict(torch.load('./target_models\FGSMtrain.resnet20.000100.path.tar'))
+# target_model.load_state_dict(torch.load('./target_models\FGSMtrain.resnet32.000100.path.tar'))
+# target_model.load_state_dict(torch.load('./target_models\PGDadv_trained_resnet20_149.pkl'))
+# target_model = mnist.model.LeNet5()
+# target_model.load_state_dict(torch.load('adv_trained_lenet5.pkl'))
+
 target_model = target_model.cuda()
 target_model.eval()
 # load the generator of adversarial examples
-pretrained_generator_path = './models/cifar10/WGAN_GP/WGAN_GP_G_best.pkl'
-pretrained_discriminator_path = './models/cifar10/WGAN_GP/WGAN_GP_D_best.pkl'
-
+# pretrained_generator_path = './models/WGAN_GP_wideresnet/cifar10/WGAN_GP/WGAN_GP_G_best.pkl'
+# pretrained_generator_path = './models/cifar10/WGAN_GP_resnet32/WGAN_GP_G_best.pkl'
+pretrained_generator_path = './models/cifar10/WGAN_GP_resnet20/WGAN_GP_G_best.pkl'
+# pretrained_generator_path = './models/WGAN_GP_mnist2/mnist/WGAN_GP/WGAN_GP100_G.pkl'
 pretrained_G = WGAN_GP.generator(input_dim=62, output_dim=3, input_size=32).to(device)
+# pretrained_G = WGAN_GP.generator(input_dim=62, output_dim=1, input_size=28).to(device)
 pretrained_G.load_state_dict(torch.load(pretrained_generator_path))
 pretrained_G.eval()
 
-pretrained_D = WGAN_GP.discriminator(input_dim=3, output_dim=1, input_size=32).to(device)
-pretrained_D.load_state_dict(torch.load(pretrained_discriminator_path))
-pretrained_D.eval()
-
-# test adversarial examples in MNIST training dataset
-transform = transforms.Compose([transforms.Resize((32, 32)), transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
-cifar10_dataset = torchvision.datasets.CIFAR10(
+# test adversarial examples in cifar10 training dataset
+# transform = transforms.Compose([transforms.Resize((32, 32)), transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, 4),
+    transforms.ToTensor(),
+    normalize,
+])
+train_dataset = torchvision.datasets.CIFAR10(
     '../cifar-10-batches-py', train=True, transform=transform, download=True)
 train_dataloader = DataLoader(
-    cifar10_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-num_correct = 0
-label4 = [2]*64
-target_label = torch.LongTensor(64).zero_()
-# target_label = torch.LongTensor(label4)
+    train_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
+# test adversarial examples in mnist training dataset
+# transform = transforms.Compose([transforms.Resize((28, 28)), transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
+# train_dataset = datasets.MNIST('data/mnist', train=True, download=True, transform=transform)
+# train_dataloader = DataLoader(train_dataset,batch_size=batch_size, shuffle=True)
+
+num_correct = 0
+num_correct_ori = 0
+label4 = [0]*64
+# target_label = torch.LongTensor(64).zero_()
+target_label = torch.LongTensor(label4)
 target_label = target_label.cuda()
+'''
 for i, data in enumerate(train_dataloader):
     test_img, test_label = data
     test_img, test_label = test_img.to(device), test_label.to(device)
@@ -99,26 +131,39 @@ for i, data in enumerate(train_dataloader):
     # Utils.save_images(test_img[:image_frame_dim * image_frame_dim, :, :, :], [image_frame_dim, image_frame_dim],
     #                   'H:/adversarial_attacks/pytorch-generative-model-collections/results/cifar10/cifar10.png')
     adv_img = pretrained_G(z_)
-    visualize_results(pretrained_G, batch_size)
+    visualize_results(pretrained_G, batch_size,adv_img,i)
     pred_lab = torch.argmax(target_model(adv_img), 1)
-    print(pred_lab)
+    pred_lab_ori = torch.argmax(target_model(test_img),1)
+    # print(pred_lab)
     num_correct += torch.sum(pred_lab == target_label, 0)
+    num_correct_ori += torch.sum(pred_lab_ori == test_label, 0)
     # exit()
     # except:
     #     break
 
 print('cifar10 training dataset:')
 print('num_correct: ', num_correct.item())
+print('num_correct_ort: ', num_correct_ori.item())
 print('accuracy of adv imgs in training set: %f\n' %
-      (num_correct.item()/len(cifar10_dataset)), len(cifar10_dataset))
+      (num_correct.item()/len(train_dataset))
+print('accuracy of ori imgs in training set: %f\n' %
+      (num_correct_ori.item()/len(train_dataset))
+'''
 
-# test adversarial examples in MNIST testing dataset
-cifar10_dataset_test = torchvision.datasets.CIFAR10(
+# test adversarial examples in cifar10 testing dataset
+test_dataset = torchvision.datasets.CIFAR10(
     '../cifar-10-batches-py', train=False, transform=transform, download=True)
 test_dataloader = DataLoader(
-    cifar10_dataset_test, batch_size=batch_size, shuffle=False, num_workers=0)
-num_correct = 0
+    test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
+# test adversarial examples in mnist testing dataset
+# transform = transforms.Compose([transforms.Resize((28, 28)), transforms.ToTensor(), transforms.Normalize(mean=[0.5], std=[0.5])])
+# test_dataset = datasets.MNIST('data/mnist', train=False, download=True, transform=transform)
+# test_dataloader = DataLoader(test_dataset,
+#     batch_size=batch_size, shuffle=True)
+
+num_correct = 0
+num_correct_ori = 0
 for i, data in enumerate(test_dataloader):
     test_img, test_label = data
     test_img, test_label = test_img.to(device), test_label.to(device)
@@ -131,14 +176,18 @@ for i, data in enumerate(test_dataloader):
     #     adv_img = torch.clamp(adv_img, 0, 1)
     # except:
     #     break
-    try:
-        adv_img = pretrained_G(z_)
-        pred_lab = torch.argmax(target_model(adv_img), 1)
-        num_correct += torch.sum(pred_lab == target_label, 0)
-    except:
-        break
-    
+    # try:
+    adv_img = pretrained_G(z_)
+    pred_lab = torch.argmax(target_model(adv_img), 1)
+    pred_lab_ori = torch.argmax(target_model(test_img),1)
+    num_correct += torch.sum(pred_lab == target_label, 0)
+    num_correct_ori += torch.sum(pred_lab_ori == test_label, 0)
+    # except:
+    #     break
 
 print('num_correct: ', num_correct.item())
-print('accuracy of adv imgs in testing set: %f\n' %
-      (num_correct.item()/len(cifar10_dataset_test)), len(cifar10_dataset_test))
+print('num_correct_ort: ', num_correct_ori.item())
+acc_adv = num_correct.item()/len(test_dataset)
+acc_ori = num_correct_ori.item()/len(test_dataset)
+print('accuracy of adv imgs in testing set: %f\n' % acc_adv)
+print('accuracy of ori imgs in testing set: %f\n' % acc_ori)

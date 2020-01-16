@@ -2,8 +2,10 @@
 /models
 /data
 /__pycache__
-.vscode/settings.json
+.vscode
 cifar10/__pycache__
 utils/__pycache__
 /.vscode
 /logs
+mnist/__pycache__
+target_models

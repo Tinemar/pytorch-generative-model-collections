@@ -1,0 +1,3 @@
+import os
+# os.system("python main.py --dataset cifar10 --gan_type WGAN_GP --epoch 100 --input_size 32 --batch_size 64 --lrG 0.0002 --lrD 0.0002 --save_dir models/WGAN_GP_wideresnet --result_dir results/WGAN_GP_wideresnet --checkpoint H:/adversarial_attacks/pytorch-generative-model-collections/models/cifar10/WGAN_GP_resnet20/WGAN_GP400ori_ --target_model wideresnet --lrG 0.0002 --lrD 0.0002")
+os.system("python main.py --dataset mnist --gan_type WGAN_GP --epoch 100 --batch_size 128 --input_size 28 --checkpoint H:/adversarial_attacks/pytorch-generative-model-collections/models/WGAN_GP_mnist2/mnist/WGAN_GP/WGAN_GP64_ --target_model mnist_2 --save_dir models/WGAN_GP_mnist2 --result_dir results/WGAN_GP_mnist2")

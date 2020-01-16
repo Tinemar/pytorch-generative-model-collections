@@ -29,14 +29,15 @@ def parse_args():
                         help='Directory name to save the model')
     parser.add_argument('--result_dir', type=str, default='results', help='Directory name to save the generated images')
     parser.add_argument('--log_dir', type=str, default='logs', help='Directory name to save training logs')
-    parser.add_argument('--lrG', type=float, default=0.0002)
-    parser.add_argument('--lrD', type=float, default=0.0002)
+    parser.add_argument('--lrG', type=float, default=0.00001)
+    parser.add_argument('--lrD', type=float, default=0.00001)
     parser.add_argument('--beta1', type=float, default=0.5)
     parser.add_argument('--beta2', type=float, default=0.999)
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--benchmark_mode', type=bool, default=True)
     parser.add_argument('--checkpoint',type=str,default='')
     parser.add_argument('--adv',type=bool,default=False)
+    parser.add_argument('--target_model',type=str,default="")
 
     return check_args(parser.parse_args())
 
